@@ -11,7 +11,7 @@
     "dev": "next dev",
     "build": "next build",
     "preview": "npx --yes serve out",
-    "test": "node --test lib/"
+    "test": "node --test lib/*.test.ts"
   },
   "dependencies": {
     "next": "^15.5.4",
