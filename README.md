@@ -1,5 +1,7 @@
 # Click GO → $1,000,000? A funnel projection
 
+**Live:** https://qiuzan2001.github.io/problem-to-profit/ (public, GitHub Pages)
+
 Built from this spec:
 
 ```gherkin
@@ -12,56 +14,34 @@ The `Then` clause has no verifiable postcondition. Revenue is not a function of 
 click; it is a function of traffic × conversion × price × retention. This app does
 not pretend otherwise and never prints "goal achieved". It runs the model that the
 clause is skipping and reports a **probability**, with the inputs that probability
-depends on stated on screen.
+depends on on screen.
 
 Rewritten into something testable:
 
 ```gherkin
 Given a funnel model with traffic, conversion, price, churn and a horizon
 When I click "GO"
-Then 2,000 seeded sample paths are simulated
+Then 2,000 seeded sample paths are simulated in the browser
 And the median, p10, p90 and P(reach $1,000,000) are displayed
-And the run is persisted to SQLite with its seed
+And the run is appended to local history with its seed
 And replaying the same seed and inputs reproduces the same numbers
-And no Stripe charge, session, or URL is created in simulation mode
+And no charge, session, or payment URL is created when none was configured
 ```
 
 ## Run
 
 ```bash
 pnpm install
-pnpm dev            # http://localhost:3000
-pnpm test           # node --test lib/  (engine invariants)
-pnpm build && pnpm start
+pnpm dev            # http://localhost:3000 (no basePath in dev)
+pnpm test           # node --test lib/*.test.ts  (engine invariants)
+pnpm build          # static export -> out/
+pnpm preview        # serve out/ locally
 ```
-
-## Deploy
-
-Container (`Dockerfile`: multi-stage, `output: 'standalone'`, `node:24-alpine`, non-root `app`
-user; the deps stage asserts `node:sqlite` exists before installing):
-
-```bash
-docker build -t profit:0.1.1 .
-docker run -d --name profit --restart unless-stopped \
-  -p 3100:3100 -v profit-data:/app/data profit:0.1.1
-```
-
-`/app/data` is a named volume, so projection history survives rebuilds.
-
-Tailnet HTTPS — no cloud account, no inbound rules, cert issued by the tailnet CA:
-
-```bash
-tailscale serve --bg --https=8443 http://127.0.0.1:3100
-# https://studio01.char-logarithm.ts.net:8443/
-tailscale serve --https=8443 off   # remove
-```
-
-Reachable from any device on the tailnet (phone, ipad, 5800x). Not public: `tailscale funnel`
-would be the public step, deliberately not taken.
 
 ## Model
 
-`lib/engine.ts` — pure, seeded (mulberry32), no I/O. All money is integer cents.
+`lib/engine.ts` — pure, seeded (mulberry32), no I/O, runs identically in Node and
+in the browser. All money is integer cents.
 
 Per month:
 
@@ -81,22 +61,36 @@ independently of the path: units needed, and visitors needed at the stated CVR.
 
 ## Surfaces
 
-- `app/api/go/route.ts` — clamps every assumption, runs the projection, inserts a
-  `runs` row, returns the summary (sample paths stay server-side).
-- `app/api/checkout/route.ts` → `lib/stripe.ts` — `mode()` is `live` only when
-  `STRIPE_SECRET_KEY` is set. In `simulation` it performs no network call and
-  returns `url: null` with a reason, so the UI cannot display a link that does not
-  exist.
-- `lib/db.ts` — `node:sqlite` (no native dependency) at `data/projections.db`.
 - `components/Dashboard.tsx` — assumption inputs, GO, percentile band chart, goal
-  cost panel, run history.
+  cost panel, run history. Calls `project()` directly; history is
+  `localStorage['pp.runs.v1']`, capped at 12 rows, with a clear button.
+- `lib/checkout.ts` — price catalog plus `paymentUrl`, read from
+  `NEXT_PUBLIC_STRIPE_PAYMENT_LINK` at build time. Absent → the UI shows a reason
+  and opens nothing; a link that does not exist can never be displayed.
+- `app/page.tsx`, `app/layout.tsx` — shell. No API routes, no server actions.
 
-## Environment
+There is deliberately no server: no `node:sqlite` runs table, no `/api/go`, no
+Stripe SDK, no secret key. The public deployment is static files.
+
+## Deploy
+
+`.github/workflows/deploy.yml` runs `pnpm test` then `pnpm build` and publishes
+`out/` through `actions/upload-pages-artifact` + `actions/deploy-pages`. Pages
+source is `main` with `build_type: workflow`.
+
+Two couplings to know about:
+
+- `next.config.ts` sets `basePath = '/problem-to-profit'` in production, which
+  must equal the repo name, or asset URLs 404. Dev runs with no basePath.
+- A real checkout needs a Payment Link created in the Stripe dashboard, supplied
+  as `NEXT_PUBLIC_STRIPE_PAYMENT_LINK` at build time. It is baked into the bundle,
+  so it is public by design — a Payment Link is a public URL, not a secret.
+
+Optional build-time env:
 
 | var | effect |
 | --- | --- |
-| `STRIPE_SECRET_KEY` | unset → SIMULATION banner, no checkout; set → real Checkout Sessions |
-| `APP_URL` | success/cancel origin for live checkout, default `http://localhost:3000` |
+| `NEXT_PUBLIC_STRIPE_PAYMENT_LINK` | unset → "STATIC · PROJECTION ONLY" banner, checkout opens nothing; set → banner flips and the button opens that link |
 
 ## What this is not
 
